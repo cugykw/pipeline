@@ -186,7 +186,7 @@ func TestMergeStepsWithStepTemplate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := MergeStepsWithStepTemplate(tc.template, tc.steps)
 			if err != nil {
-				t.Errorf("expected no error. Got error %v", err)
+				t.Errorf("expected  no error. Got error %v", err)
 			}
 
 			if d := cmp.Diff(tc.expected, result, resourceQuantityCmp); d != "" {
