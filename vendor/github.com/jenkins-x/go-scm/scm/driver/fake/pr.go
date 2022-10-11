@@ -138,6 +138,10 @@ func (s *pullService) ListChanges(ctx context.Context, repo string, number int, 
 	return f.PullRequestChanges[number][returnStart:returnEnd], nil, nil
 }
 
+func (s *pullService) ListCommits(ctx context.Context, repo string, number int, opts *scm.ListOptions) ([]*scm.Commit, *scm.Response, error) {
+	return nil, nil, scm.ErrNotSupported
+}
+
 func (s *pullService) ListComments(ctx context.Context, repo string, number int, opts *scm.ListOptions) ([]*scm.Comment, *scm.Response, error) {
 	f := s.data
 	return append([]*scm.Comment{}, f.PullRequestComments[number]...), nil, nil
@@ -251,8 +255,14 @@ func (s *pullService) Update(_ context.Context, fullName string, number int, inp
 	return answer, nil, nil
 }
 
-func (s *pullService) Close(context.Context, string, int) (*scm.Response, error) {
-	panic("implement me")
+func (s *pullService) Close(_ context.Context, fullName string, number int) (*scm.Response, error) {
+	pr, ok := s.data.PullRequests[number]
+	if !ok || pr == nil {
+		return nil, fmt.Errorf("pull request %d not found", number)
+	}
+	pr.State = "closed"
+	pr.Closed = true
+	return nil, nil
 }
 
 func (s *pullService) Reopen(context.Context, string, int) (*scm.Response, error) {
