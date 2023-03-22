@@ -245,50 +245,80 @@ func (c *Reconciler) durationAndCountMetrics(ctx context.Context, tr *v1beta1.Ta
 	}
 }
 
-func (c *Reconciler) stopSidecars(ctx context.Context, tr *v1beta1.TaskRun) error {
-	ctx, span := c.tracerProvider.Tracer(TracerName).Start(ctx, "stopSidecars")
-	defer span.End()
+func (c *Reconciler) stopSidecarAndUpdateStatus(ctx context.Context, namespace, name string, status v1beta1.TaskRunStatus) (*v1beta1.TaskRunStatus, error) {
 	logger := logging.FromContext(ctx)
+
 	// do not continue without knowing the associated pod
-	if tr.Status.PodName == "" {
-		return nil
+	if status.PodName == "" {
+		return nil, nil
 	}
 
 	// do not continue if the TaskSpec had no sidecars
-	if tr.Status.TaskSpec != nil && len(tr.Status.TaskSpec.Sidecars) == 0 && len(tr.Status.Sidecars) == 0 {
-		return nil
+	if status.TaskSpec != nil && len(status.TaskSpec.Sidecars) == 0 && len(status.Sidecars) == 0 {
+		return nil, nil
 	}
 
 	// do not continue if the TaskRun was canceled or timed out as this caused the pod to be deleted in failTaskRun
-	condition := tr.Status.GetCondition(apis.ConditionSucceeded)
+	condition := status.GetCondition(apis.ConditionSucceeded)
 	if condition != nil {
 		reason := v1beta1.TaskRunReason(condition.Reason)
 		if reason == v1beta1.TaskRunReasonCancelled || reason == v1beta1.TaskRunReasonTimedOut {
-			return nil
+			return nil, nil
 		}
 	}
 
 	// do not continue if there are no Running sidecars.
-	if !podconvert.IsSidecarStatusRunning(tr) {
-		return nil
+	if !podconvert.IsSidecarStatusRunning(status) {
+		return nil, nil
 	}
 
-	pod, err := podconvert.StopSidecars(ctx, c.Images.NopImage, c.KubeClientSet, tr.Namespace, tr.Status.PodName)
+	pod, err := podconvert.StopSidecars(ctx, c.Images.NopImage, c.KubeClientSet, namespace, status.PodName)
 	if err == nil {
 		// Check if any SidecarStatuses are still shown as Running after stopping
 		// Sidecars. If any Running, update SidecarStatuses based on Pod ContainerStatuses.
-		if podconvert.IsSidecarStatusRunning(tr) {
-			err = updateStoppedSidecarStatus(pod, tr)
+		if podconvert.IsSidecarStatusRunning(status) {
+			status, err = updateStoppedSidecarStatus(pod, status)
 		}
 	}
 	if k8serrors.IsNotFound(err) {
 		// At this stage the TaskRun has been completed if the pod is not found, it won't come back,
 		// it has probably evicted. We can return the error, but we consider it a permanent one.
-		return controller.NewPermanentError(err)
+		return nil, controller.NewPermanentError(err)
 	} else if err != nil {
-		logger.Errorf("Error stopping sidecars for TaskRun %q: %v", tr.Name, err)
-		tr.Status.MarkResourceFailed(v1beta1.TaskRunReasonStopSidecarFailed, err)
+		logger.Errorf("Error stopping sidecars for TaskRun %q: %v", name, err)
+		status.MarkResourceFailed(v1beta1.TaskRunReasonStopSidecarFailed, err)
 	}
+
+	return &status, nil
+}
+
+func (c *Reconciler) stopSidecars(ctx context.Context, tr *v1beta1.TaskRun) error {
+	ctx, span := c.tracerProvider.Tracer(TracerName).Start(ctx, "stopSidecars")
+	defer span.End()
+	logger := logging.FromContext(ctx)
+
+	for i, retryStatus := range tr.Status.RetriesStatus {
+		status, err := c.stopSidecarAndUpdateStatus(ctx, tr.Namespace, tr.Name, retryStatus)
+		if err != nil {
+			if controller.IsPermanentError(err) {
+				logger.Errorf("Error stopping sidecars for TaskRun %q: %v", tr.Name, err)
+				continue
+			}
+			return err
+		}
+		if status != nil {
+			tr.Status.RetriesStatus[i] = *status
+		}
+	}
+
+	status, err := c.stopSidecarAndUpdateStatus(ctx, tr.Namespace, tr.Name, tr.Status)
+	if err != nil {
+		return err
+	}
+	if status != nil {
+		tr.Status = *status
+	}
+
 	return nil
 }
 
@@ -822,8 +852,8 @@ func isPodAdmissionFailed(err error) bool {
 
 // updateStoppedSidecarStatus updates SidecarStatus for sidecars that were
 // terminated by nop image
-func updateStoppedSidecarStatus(pod *corev1.Pod, tr *v1beta1.TaskRun) error {
-	tr.Status.Sidecars = []v1beta1.SidecarState{}
+func updateStoppedSidecarStatus(pod *corev1.Pod, status v1beta1.TaskRunStatus) (v1beta1.TaskRunStatus, error) {
+	status.Sidecars = []v1beta1.SidecarState{}
 	for _, s := range pod.Status.ContainerStatuses {
 		if !podconvert.IsContainerStep(s.Name) {
 			var sidecarState corev1.ContainerState
@@ -845,7 +875,7 @@ func updateStoppedSidecarStatus(pod *corev1.Pod, tr *v1beta1.TaskRun) error {
 				sidecarState = s.State
 			}
 
-			tr.Status.Sidecars = append(tr.Status.Sidecars, v1beta1.SidecarState{
+			status.Sidecars = append(status.Sidecars, v1beta1.SidecarState{
 				ContainerState: *sidecarState.DeepCopy(),
 				Name:           podconvert.TrimSidecarPrefix(s.Name),
 				ContainerName:  s.Name,
@@ -853,7 +883,7 @@ func updateStoppedSidecarStatus(pod *corev1.Pod, tr *v1beta1.TaskRun) error {
 			})
 		}
 	}
-	return nil
+	return status, nil
 }
 
 // applyVolumeClaimTemplates and return WorkspaceBindings were templates is translated to PersistentVolumeClaims

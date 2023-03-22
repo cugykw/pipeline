@@ -283,8 +283,8 @@ func StopSidecars(ctx context.Context, nopImage string, kubeclient kubernetes.In
 
 // IsSidecarStatusRunning determines if any SidecarStatus on a TaskRun
 // is still running.
-func IsSidecarStatusRunning(tr *v1beta1.TaskRun) bool {
-	for _, sidecar := range tr.Status.Sidecars {
+func IsSidecarStatusRunning(status v1beta1.TaskRunStatus) bool {
+	for _, sidecar := range status.Sidecars {
 		if sidecar.Terminated == nil {
 			return true
 		}

@@ -20,6 +20,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned/scheme"
+	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -153,6 +154,16 @@ kind: VerificationPolicy
 ` + yaml
 	mustParseYAML(t, yaml, &v)
 	return &v
+}
+
+func MustParsePod(t *testing.T, yaml string) *coreV1.Pod {
+	t.Helper()
+	var pod coreV1.Pod
+	yaml = `apiVersion: v1
+kind: Pod
+` + yaml
+	mustParseYAML(t, yaml, &pod)
+	return &pod
 }
 
 func mustParseYAML(t *testing.T, yaml string, i runtime.Object) {

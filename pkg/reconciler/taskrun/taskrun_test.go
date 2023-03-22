@@ -4042,12 +4042,27 @@ status:
   startTime: "2000-01-01T01:01:01Z"
 `)
 
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-taskrun-pod",
-			Namespace: "foo",
-		},
-	}
+	pod := parse.MustParsePod(t, `
+metadata:
+  name: test-taskrun-pod
+  namespace: foo
+spec:
+  containers:
+  - name: sidecar-kc
+status:
+  containerStatuses:
+  - containerID: docker://8337126b0ece561def4848040c67150f23f9b554755e17ad91a762b32a0db3cd
+    image: cr.d.xiaomi.net/yangkewei/http-test:v1
+    imageID: docker-pullable://cr.d.xiaomi.net/yangkewei/http-test@sha256:875ae78c54e2793a71b16cd0080c3689a06e683e2bc334a60f79679fd048fb1f
+    name: sidecar-kc
+    ready: true
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2023-03-22T08:33:43Z"
+  phase: Running
+`)
 
 	d := test.Data{
 		Pods:     []*corev1.Pod{pod},
@@ -4065,6 +4080,32 @@ status:
 		t.Errorf("Expected no error to be returned by reconciler: %v", reconcileErr)
 	}
 
+	// Get the updated TaskRun.
+	reconciledTaskRun, err := clients.Pipeline.TektonV1beta1().TaskRuns(tr.Namespace).Get(testAssets.Ctx, tr.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Error getting updated TaskRun after second reconcile: %v", err)
+	}
+
+	newPod, err := clients.Kube.CoreV1().Pods(pod.Namespace).Get(testAssets.Ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Error getting updated TaskRun after second reconcile: %v", err)
+	}
+
+	if d := cmp.Diff(newPod, pod); d != "" {
+		t.Errorf("Didn't get expected TaskRun: %v", diff.PrintWantGot(d))
+	}
+
+	ignoreFields := []cmp.Option{
+		ignoreLastTransitionTime,
+		ignoreStartTime,
+		ignoreCompletionTime,
+		ignoreObjectMeta,
+	}
+
+	if d := cmp.Diff(reconciledTaskRun, tr, ignoreFields...); d != "" {
+		t.Errorf("Didn't get expected TaskRun: %v", diff.PrintWantGot(d))
+	}
+
 	// Verify that the pod was retrieved.
 	getPodFound := false
 	for _, action := range clients.Kube.Actions() {
@@ -4080,8 +4121,9 @@ status:
 
 func TestStopSidecars_NoClientGetPodForTaskSpecWithoutRunningSidecars(t *testing.T) {
 	for _, tc := range []struct {
-		desc string
-		tr   *v1beta1.TaskRun
+		desc   string
+		tr     *v1beta1.TaskRun
+		wantTr *v1beta1.TaskRun
 	}{{
 		desc: "no sidecars",
 		tr: parse.MustParseV1beta1TaskRun(t, `
