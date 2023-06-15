@@ -29,11 +29,11 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.2.0
 	gopkg.in/square/go-jose.v2 v2.6.0
 	k8s.io/api v0.25.8
-	k8s.io/apimachinery v0.27.0-beta.0
+	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.25.8
 	k8s.io/code-generator v0.25.8
 	k8s.io/klog v1.0.0
-	k8s.io/kube-openapi v0.0.0-20230308215209-15aac26d736a
+	k8s.io/kube-openapi v0.0.0-20230501164219-8b0f38b5fd1f
 	knative.dev/pkg v0.0.0-20230221145627-8efb3485adcf
 	sigs.k8s.io/yaml v1.3.0
 )
